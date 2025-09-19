@@ -1,73 +1,125 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Batch CIK PDFs</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:24px;max-width:900px}
-    h1{font-size:20px;margin:0 0 12px}
-    label{display:block;font-weight:600;margin-top:14px}
-    textarea{width:100%;height:140px;padding:10px;font-size:14px;box-sizing:border-box}
-    button{padding:12px 16px;font-size:14px;cursor:pointer}
-    .log{margin-top:12px;background:#fafafa;border:1px solid #eee;padding:10px;font-family:ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap}
-    .ok{color:#196a2a}.err{color:#a40000}
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Batch CIK PDFs — Fund + EIN</title>
+<style>
+  :root { --fg:#111; --sub:#666; --ok:#196a2a; --err:#a40000; --bg:#fafafa; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:var(--fg); margin:28px; max-width: 980px; }
+  h1 { font-size: 20px; margin:0 0 14px }
+  p { margin: 6px 0 12px; color:var(--sub) }
+  label { display:block; font-weight:600; margin-top:14px }
+  textarea { width:100%; min-height:160px; padding:10px; font-size:14px; box-sizing:border-box }
+  .row { display:flex; gap:12px; align-items:center; margin-top:10px }
+  input[type=file] { font-size: 14px }
+  button { padding:12px 16px; font-size:14px; cursor:pointer }
+  .log { margin-top:16px; background:var(--bg); border:1px solid #eee; padding:10px; font-family: ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap }
+  .ok { color: var(--ok) } .err { color: var(--err) }
+  .muted { color: var(--sub) }
+  .footer { margin-top: 18px; font-size: 12px; color: var(--sub) }
+</style>
 </head>
 <body>
   <h1>Form ID → PDFs (Batch)</h1>
-  <p>Source HTML, EIN seed, paper format are fixed server-side.</p>
+  <p>Enter one or more rows in the format: <code>Fund,EIN</code>. The source HTML, EIN seed, and paper format are fixed server-side.</p>
 
-  <label>Funds CSV (one per line): <small>Format: <code>Fund,EIN</code></small></label>
-  <textarea id="rows" placeholder="Defense VII, a Series of E1 VC, LLC,111111111&#10;Defense VIII, a Series of E1 VC, LLC,222222222"></textarea>
+  <label for="rows">Funds CSV (one per line)</label>
+  <textarea id="rows" placeholder="Defense VII, a Series of E1 VC, LLC,111111111
+Defense VIII, a Series of E1 VC, LLC,222222222"></textarea>
 
-  <button id="go">Generate PDFs</button>
-  <div class="log" id="log"></div>
+  <div class="row">
+    <input id="csv" type="file" accept=".csv,text/csv" />
+    <button id="go">Generate PDFs</button>
+    <span id="count" class="muted"></span>
+  </div>
+
+  <div id="log" class="log"></div>
 
 <script>
-const API = "https://YOUR-PROJECT.vercel.app/api/cik-pdf"; // <- your Vercel URL
+/* === CONFIG: your Apps Script URL (fixed) === */
+const API = "https://script.google.com/macros/s/AKfycbzJB5PjkbcAoyVqrbhzNVwvPi3yOZmmsBiPrJs6FR_rLYrTPSWqtRzqOpVtj-htTd57Rw/exec";
 
-const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"");
-const outName = fund => `${slug(fund)}cik_fornotary.pdf`;
-const $ = id => document.getElementById(id);
-const say = (m,cls="") => { const d = document.createElement("div"); if(cls) d.className = cls; d.textContent = m; $("log").appendChild(d); };
+/* === helpers === */
+const $ = (id) => document.getElementById(id);
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"");
+const outName = (fund) => `${slug(fund)}cik_fornotary.pdf`;
 
-function parseRows(txt){
-  const rows = [];
-  for (const line of txt.split(/\r?\n/)) {
-    const s = line.trim();
-    if (!s) continue;
-    const parts = s.split(",").map(x=>x.trim());
-    if (parts.length < 2) continue;
-    if (rows.length===0 && /fund/i.test(parts[0]) && /ein/i.test(parts[1])) continue; // header
-    rows.push({ fund: parts.slice(0,-1).join(", "), ein: parts.at(-1) });
-  }
-  return rows;
+function say(msg, cls="") {
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  $("log").appendChild(line);
 }
 
-async function genOne({fund, ein}, i, n){
-  say(`[${i}/${n}] ${fund} …`);
-  const r = await fetch(`${API}?fund=${encodeURIComponent(fund)}&ein=${encodeURIComponent(ein)}`);
+/* Parse free-form CSV where fund may contain commas; EIN is last cell */
+function parseRows(txt) {
+  const out = [];
+  for (const raw of txt.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    // naive CSV split; OK because EIN has no commas
+    const cells = line.split(",").map(s => s.trim()).filter(Boolean);
+    if (cells.length < 2) continue;
+    // skip header if present
+    if (out.length === 0 && /fund/i.test(cells[0]) && /ein/i.test(cells.at(-1))) continue;
+    const ein = cells.at(-1);
+    const fund = cells.slice(0, -1).join(", ");
+    out.push({ fund, ein });
+  }
+  return out;
+}
+
+/* Read CSV file input */
+$("csv").addEventListener("change", async (e) => {
+  const f = e.target.files?.[0];
+  if (!f) return;
+  const text = await f.text();
+  $("rows").value = text.trim();
+  const rows = parseRows(text);
+  $("count").textContent = rows.length ? `Loaded ${rows.length} row(s)` : "";
+});
+
+/* Download one PDF from Apps Script for a given row */
+async function fetchOne({ fund, ein }, i, n) {
+  const url = `${API}?fund=${encodeURIComponent(fund)}&ein=${encodeURIComponent(ein)}`;
+  const r = await fetch(url, { method: "GET" });
   if (!r.ok) throw new Error(await r.text());
   const blob = await r.blob();
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = outName(fund);
-  document.body.appendChild(a); a.click(); a.remove();
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
   URL.revokeObjectURL(a.href);
-  say(`OK → ${outName(fund)}`, "ok");
 }
 
+/* Batch runner (sequential to avoid throttling) */
 $("go").addEventListener("click", async () => {
   $("log").textContent = "";
-  const rows = parseRows($("rows").value);
+  const rows = parseRows($("rows").value || "");
   if (!rows.length) { say("Enter at least one line: Fund,EIN","err"); return; }
-  for (let i=1;i<=rows.length;i++){
-    try { await genOne(rows[i-1], i, rows.length); }
-    catch (e) { say(`ERROR: ${e.message}`, "err"); }
+  $("count").textContent = `${rows.length} row(s)`;
+
+  say(`Starting batch… (${rows.length} row${rows.length>1?"s":""})`);
+  for (let i = 0; i < rows.length; i++) {
+    const { fund, ein } = rows[i];
+    if (!fund || !ein) { say(`[${i+1}] skipped (missing fund or EIN)`, "err"); continue; }
+    try {
+      say(`[${i+1}] Generating ${outName(fund)} …`);
+      await fetchOne(rows[i], i+1, rows.length);
+      say(`[${i+1}] OK`, "ok");
+    } catch (e) {
+      say(`[${i+1}] ERROR: ${e.message}`, "err");
+    }
   }
   say("Done.");
 });
 </script>
+
+<div class="footer">
+  Tip: if your browser blocks multiple downloads, allow “automatic downloads” for this page so batch save works without prompts.
+</div>
 </body>
 </html>
