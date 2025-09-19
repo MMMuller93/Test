@@ -1,44 +1,90 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Batch CIK PDFs</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Batch CIK PDFs (Client-side)</title>
 <style>
-  body{font-family:sans-serif;margin:24px;max-width:900px}
-  h1{font-size:20px;margin:0 0 14px}
-  textarea{width:100%;min-height:160px;padding:10px;font-size:14px}
-  button{padding:12px 16px;font-size:14px;cursor:pointer;margin-top:12px}
-  .log{margin-top:16px;background:#fafafa;border:1px solid #ddd;padding:10px;font-family:monospace;white-space:pre-wrap}
-  .ok{color:green}.err{color:#a00}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:24px;max-width:980px}
+  h1{font-size:20px;margin:0 0 12px}
+  label{display:block;font-weight:600;margin-top:12px}
+  textarea{width:100%;height:140px;padding:10px;box-sizing:border-box}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px}
+  button{padding:10px 14px;font-size:14px;cursor:pointer}
+  .log{margin-top:14px;background:#fafafa;border:1px solid #eee;padding:10px;font-family:ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap}
+  .ok{color:#196a2a}.err{color:#a40000}
+  /* Print CSS injected into each doc too, but keep a copy here for print() path */
+  @media print {
+    .pb { break-before: page; page-break-before: always; }
+    table, tr, td { page-break-inside: avoid; }
+    @page { size: Letter; margin: 0.5in; }
+  }
+</style>
+<!-- html2pdf bundle (html2canvas + jsPDF) for auto-download path -->
+<script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
+</head>
+<body>
+  <h1>Form ID → PDFs (Batch, client-side)</h1>
+  <p>Enter rows as <code>Fund,EIN</code>. EIN seed is fixed to <b>394238343</b>. Paper = <b>Letter</b>. No servers used.</p>
+
+  <label>Funds CSV</label>
+  <textarea id="rows" placeholder="Defense VII, a Series of E1 VC, LLC,111111111
+Defense VIII, a Series of E1 VC, LLC,222222222"></textarea>
+
+  <div class="row">
+    <button id="auto">Auto-download PDFs (fast)</button>
+    <button id="print">Print PDFs (best fidelity)</button>
+    <span id="count"></span>
+  </div>
+
+  <div id="log" class="log"></div>
+
+  <!-- Your raw HTML template lives here (one-time paste).
+       Paste the entire HTML (doctype + html/head/body) you posted. -->
+  <template id="base-html">
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Form ID</title>
+<style type="text/css"> * {margin:0; padding:0; text-indent:0;}
+.s1{color:#FFF;font-family:Arial,sans-serif;font-weight:bold;font-size:3.5pt}
+.s2{color:black;font-family:Arial,sans-serif;font-weight:bold;font-size:3.5pt}
+.s3{color:#FFF;font-family:Arial,sans-serif;font-weight:bold;font-size:3pt}
+.p,p{color:black;font-family:Arial,sans-serif;font-size:4pt;margin:0}
+h1{color:black;font-family:Arial,sans-serif;font-weight:bold;font-size:4pt}
+.s4{color:black;font-family:Arial,sans-serif;font-size:4pt}
+.s5{color:black;font-family:Arial,sans-serif;font-size:3pt}
+.s6{color:black;font-family:Arial,sans-serif;font-weight:bold;font-size:3pt}
+.s7{color:black;font-family:Arial,sans-serif;font-size:4pt}
+table,tbody{vertical-align:top;overflow:visible}
 </style>
 </head>
 <body>
-<h1>Form ID → PDFs (Batch)</h1>
-<p>Enter one or more rows in the format: <code>Fund,EIN</code>. The source HTML, EIN seed, and paper format are fixed server-side.</p>
-
-<textarea id="rows" placeholder="Defense VII, a Series of E1 VC, LLC,111111111
-Defense VIII, a Series of E1 VC, LLC,222222222"></textarea><br>
-<button id="go">Generate PDFs</button>
-
-<div id="log" class="log"></div>
+<!-- ======= BEGIN YOUR LONG BODY CONTENT (unchanged) ======= -->
+<!-- paste your full body here; what you sent starting with the big tables -->
+<!-- ======= END YOUR BODY CONTENT ======= -->
+</body>
+</html>
+  </template>
 
 <script>
-// your Apps Script endpoint (fixed)
-const API = "https://script.google.com/macros/s/AKfycbyyDZuLteKAz7CPey3g33E_ws-6IElW0WZOJgCAd74fRyvIyL_49Sv_hSHJTkjX86V0yw/exec";
+/*** Config ***/
+const EIN_SEED = "394238343";
+const PAPER_FORMAT = "Letter";
 
+/*** Helpers ***/
+const $ = id => document.getElementById(id);
+const say = (m, cls="") => { const d=document.createElement("div"); if(cls)d.className=cls; d.textContent=m; $("log").appendChild(d); };
 const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"");
 const outName = fund => `${slug(fund)}cik_fornotary.pdf`;
-const log = document.getElementById("log");
-function say(m,cls=""){const d=document.createElement("div");if(cls)d.className=cls;d.textContent=m;log.appendChild(d);}
 
 function parseRows(txt){
   const out=[];
-  for (const line of txt.split(/\\r?\\n/)){
-    const s=line.trim(); if(!s)continue;
+  for (const line of txt.split(/\r?\n/)) {
+    const s=line.trim(); if(!s) continue;
     const cells=s.split(",").map(x=>x.trim());
-    if(cells.length<2)continue;
-    if(out.length===0 && /fund/i.test(cells[0])&&/ein/i.test(cells.at(-1)))continue;
+    if(cells.length<2) continue;
+    if(out.length===0 && /fund/i.test(cells[0]) && /ein/i.test(cells.at(-1))) continue; // optional header
     const ein=cells.at(-1);
     const fund=cells.slice(0,-1).join(", ");
     out.push({fund,ein});
@@ -46,30 +92,127 @@ function parseRows(txt){
   return out;
 }
 
-async function fetchOne({fund,ein}){
-  const r=await fetch(`${API}?fund=${encodeURIComponent(fund)}&ein=${encodeURIComponent(ein)}`);
-  if(!r.ok) throw new Error(await r.text());
-  const blob=await r.blob();
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob);
-  a.download=outName(fund);
-  document.body.appendChild(a);
-  a.click();a.remove();
-  URL.revokeObjectURL(a.href);
+// inject print CSS + page breaks before PART 2–5
+function injectPagination(html){
+  const PRINT_CSS = `
+  <style>
+    @media print {
+      .pb { break-before: page; page-break-before: always; }
+      table, tr, td { page-break-inside: avoid; }
+      @page { size: ${PAPER_FORMAT}; margin: 0.5in; }
+    }
+  </style>`;
+  const parts = [
+    "PART 2 - COMPANY APPLICANT INFORMATION",
+    "PART 3 - ACCOUNT ADMINISTRATOR INFORMATION",
+    "PART 4 - BILLING INFORMATION",
+    "PART 5 - SIGNATURE"
+  ];
+  let out = html.includes("</head>") ? html.replace("</head>", PRINT_CSS + "\n</head>") : PRINT_CSS + html;
+  for (const p of parts){
+    const re = new RegExp(`(<[^>]+>[^<]*${p.replace(/[-/\\^$*+?.()|[\\]{}]/g,"\\$&")}[^<]*<\\/[^>]+>)`, "i");
+    out = out.replace(re, '<div class="pb"></div>\n$1');
+  }
+  return out;
 }
 
-document.getElementById("go").addEventListener("click", async()=>{
-  log.textContent="";
-  const rows=parseRows(document.getElementById("rows").value);
-  if(!rows.length){say("Enter at least one line: Fund,EIN","err");return;}
-  say(`Starting… ${rows.length} row(s)`);
-  for(let i=0;i<rows.length;i++){
-    const {fund,ein}=rows[i];
-    try{say(`[${i+1}] Generating ${outName(fund)}…`);await fetchOne(rows[i]);say(`[${i+1}] OK`,"ok");}
-    catch(e){say(`[${i+1}] ERROR: ${e.message}`,"err");}
+// Replace the text to the RIGHT of labels with fund name (runs in a live DOM)
+function applyLabelRightReplacements(doc, fund){
+  function textNodesWithBoxes(root){
+    const w = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode:n=>n.nodeValue.trim()?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT
+    });
+    const out=[]; let n;
+    while((n=w.nextNode())){
+      const r=doc.createRange(); r.selectNodeContents(n);
+      const rs=[...r.getClientRects()]; if(rs.length){
+        const x=rs[0];
+        out.push({node:n, rect:x, text:n.nodeValue.trim()});
+      }
+    }
+    return out;
   }
-  say("Done.");
-});
+  function yOverlap(a,b){return Math.max(0, Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top));}
+  function rightOf(a,b){return b.left>a.right && yOverlap(a,b) > 0.4*Math.min(a.height,b.height);}
+  const labels = ["Company's full legal name:","Conformed name:","Legal name:"];
+  const items = textNodesWithBoxes(doc.body);
+  for(const L of labels){
+    const labs = items.filter(i=>i.text===L);
+    labs.forEach(LI=>{
+      const cands = items
+        .filter(N=> rightOf(LI.rect, N.rect))
+        .sort((a,b)=>(a.rect.left-LI.rect.right)-(b.rect.left-LI.rect.right));
+      if(cands.length){ cands[0].node.nodeValue = fund; }
+    });
+  }
+}
+
+// Build a document for one row
+function buildDocHTML(fund, ein){
+  let base = $("base-html").innerHTML;
+  base = injectPagination(base).split(EIN_SEED).join(ein);     // swap EIN seed
+  // create an iframe doc, run replacements, then export that HTML fragment
+  const iframe = document.createElement("iframe");
+  iframe.style.position="fixed"; iframe.style.left="-9999px"; iframe.style.top="-9999px";
+  document.body.appendChild(iframe);
+  const d = iframe.contentDocument;
+  d.open(); d.write(base); d.close();
+  applyLabelRightReplacements(d, fund);
+  const finalHTML = "<!doctype html>\n" + d.documentElement.outerHTML;
+  document.body.removeChild(iframe);
+  return finalHTML;
+}
+
+/*** A) Auto-download via html2pdf ***/
+async function makeOneAuto(fund, ein, i, n){
+  say(`[${i}/${n}] ${fund} …`);
+  const html = buildDocHTML(fund, ein);
+  // Render the HTML into a hidden container to pass to html2pdf
+  const container = document.createElement("div");
+  container.style.position="fixed"; container.style.left="-9999px"; container.style.top="-9999px";
+  container.innerHTML = html;
+  document.body.appendChild(container);
+
+  const opt = {
+    filename: outName(fund),
+    image: { type: "jpeg", quality: 0.98 },
+    html2canvas: { scale: 2, useCORS: true, letterRendering: true },
+    jsPDF: { unit: "in", format: "letter", orientation: "portrait" },
+    pagebreak: { mode: ["css","legacy"] } // respects .pb and CSS rules
+  };
+  await html2pdf().set(opt).from(container).save();
+  document.body.removeChild(container);
+  say(`OK → ${outName(fund)}`, "ok");
+}
+
+/*** B) Native Print (opens dialog per file) ***/
+async function makeOnePrint(fund, ein, i, n){
+  say(`[${i}/${n}] ${fund} (print)…`);
+  const html = buildDocHTML(fund, ein);
+  const w = window.open("", "_blank", "noopener,noreferrer");
+  w.document.open(); w.document.write(html); w.document.close();
+  // small delay to ensure styles/layout settle
+  setTimeout(()=>{ w.focus(); w.print(); }, 300);
+}
+
+/*** Wire up UI ***/
+function run(kind){
+  $("log").textContent="";
+  const rows = parseRows($("rows").value);
+  $("count").textContent = rows.length ? `${rows.length} row(s)` : "";
+  if(!rows.length){ say("Enter at least one line: Fund,EIN","err"); return; }
+  const runOne = kind==="print" ? makeOnePrint : makeOneAuto;
+  (async()=>{
+    for(let i=0;i<rows.length;i++){
+      const r=rows[i]; if(!r.fund || !r.ein){ say(`[${i+1}] skipped (missing fund/ein)`,"err"); continue; }
+      try { await runOne(r.fund, r.ein, i+1, rows.length); }
+      catch(e){ say(`[${i+1}] ERROR: ${e.message}`,"err"); }
+    }
+    say("Done.");
+  })();
+}
+$("auto").addEventListener("click", ()=> run("auto"));
+$("print").addEventListener("click", ()=> run("print"));
 </script>
 </body>
 </html>
